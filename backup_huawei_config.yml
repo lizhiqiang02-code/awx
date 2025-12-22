@@ -1,42 +1,90 @@
 ---
-- name: Backup Huawei Switch Running Configuration
-  hosts: all # 针对清单中的所有主机执行，可通过`limit`指定部分主机
-  gather_facts: no # 网络设备通常无需收集facts
-  
+- name: 备份华为交换机配置至远程服务器
+  hosts: "{{ target_switches | default('huawei_switches') }}"
+  gather_facts: no
   vars:
-    backup_dir: "/opt/ansible_backup/{{ inventory_hostname }}" # 定义备份目录，按主机名分隔
-    backup_file: "{{ inventory_hostname }}_{{ ansible_date_time.date }}.cfg" # 定义备份文件名格式
-
+    # >>> 核心：远程备份服务器配置 <<<
+    backup_server: "172.20.149.118"
+    backup_server_user: "ansible_backup" # 修改为你的远程服务器用户名
+    backup_remote_path: "/var/lib/network-backup"
+    
+    # 本地临时目录（在AWX任务容器内）
+    local_temp_dir: "/tmp/backup_temp/{{ inventory_hostname }}"
+    
+    # 备份文件名格式
+    backup_filename: "{{ inventory_hostname }}_{{ ansible_date_time.date }}.cfg"
+    
   tasks:
-    # 任务1：在AWX服务器上为每台交换机创建专属备份目录
-    - name: Create backup directory on AWX server
+    # 第一阶段：从交换机获取配置
+    - name: 创建本地临时目录 (在AWX容器内)
       file:
-        path: "{{ backup_dir }}"
+        path: "{{ local_temp_dir }}"
         state: directory
         mode: '0755'
-      delegate_to: localhost # 该操作在AWX本地执行
-      run_once: false # 每台主机都需要执行
+      delegate_to: localhost
+      run_once: false
 
-    # 任务2：登录交换机并获取当前运行配置
-    - name: Get current running configuration from switch
-      community.network.huawei_command: # 使用华为模块执行命令
+    - name: 获取华为交换机的当前运行配置
+      community.network.huawei_command: # 关键模块，用于华为设备
         commands: display current-configuration
-      register: config_output # 将命令输出注册到变量
+      register: switch_config
 
-    # 任务3：将获取的配置保存到AWX服务器的文件中
-    - name: Save configuration to local file
+    - name: 将配置写入本地临时文件
       copy:
-        content: "{{ config_output.stdout[0] }}" # 将命令输出写入文件
-        dest: "{{ backup_dir }}/{{ backup_file }}"
+        content: "{{ switch_config.stdout[0] }}"
+        dest: "{{ local_temp_dir }}/{{ backup_filename }}"
         mode: '0644'
       delegate_to: localhost
-      
-    # （可选）任务4：压缩旧备份，例如保留最近7天的配置
-    - name: Archive old backups (keep recent 7 days)
-      archive:
-        path: "{{ backup_dir }}"
-        dest: "/opt/ansible_backup/archived/{{ inventory_hostname }}-{{ ansible_date_time.date }}.tar.gz"
-        format: gz
-        remove: yes # 压缩后删除原文件
+      changed_when: false # 此任务总是会执行，不触发changed状态
+
+    # 第二阶段：传输到远程备份服务器
+    # 方案A：使用 synchronize 模块（基于rsync，推荐）
+    - name: 【方案A】使用rsync同步备份文件到远程服务器
+      synchronize:
+        src: "{{ local_temp_dir }}/"
+        dest: "{{ backup_server_user }}@{{ backup_server }}:{{ backup_remote_path }}/{{ inventory_hostname }}/"
+        # 以下是关键参数：
+        rsync_opts:
+          - "--archive"       # 归档模式，保留权限、时间等
+          - "--compress"      # 压缩传输
+          - "--chmod=D755,F644" # 确保目录和文件有正确权限
+        private_key: "/path/to/ssh/private/key" # 如果使用密钥认证，指定路径
+        # use_ssh_args: yes   # 可继承Ansible的SSH参数
       delegate_to: localhost
-      when: false # 默认关闭，如需启用请将条件改为`true`或自定义条件
+      become: false
+      # 如果使用密码而非密钥，需额外配置：
+      # vars:
+      #   ansible_ssh_pass: your_password  # ❌ 不安全！建议用AWX凭据管理
+
+    # 方案B：使用 copy 模块 + delegate_to（更简单直接）
+    - name: 【方案B】直接复制文件到远程服务器
+      copy:
+        src: "{{ local_temp_dir }}/{{ backup_filename }}"
+        dest: "{{ backup_remote_path }}/{{ inventory_hostname }}/{{ backup_filename }}"
+        mode: '0644'
+      delegate_to: "{{ backup_server }}" # 关键：将任务委托给远程服务器执行
+      become: yes # 如果需要sudo权限写入目录
+      become_user: root
+      # 注意：此方法要求AWX能直接ssh到backup_server，且已在AWX的清单中定义
+
+    # 第三阶段：清理与验证
+    - name: 清理本地临时文件
+      file:
+        path: "{{ local_temp_dir }}"
+        state: absent
+      delegate_to: localhost
+
+    - name: 验证远程备份文件
+      stat:
+        path: "{{ backup_remote_path }}/{{ inventory_hostname }}/{{ backup_filename }}"
+      delegate_to: "{{ backup_server }}"
+      register: remote_file_stat
+      ignore_errors: yes # 避免验证失败导致整个任务失败
+
+    - name: 输出备份结果摘要
+      debug:
+        msg:
+          - "备份 {{ '成功' if remote_file_stat.stat.exists | default(false) else '失败' }}"
+          - "设备: {{ inventory_hostname }}"
+          - "文件: {{ backup_remote_path }}/{{ inventory_hostname }}/{{ backup_filename }}"
+          - "大小: {{ remote_file_stat.stat.size | default('未知') }} 字节"
