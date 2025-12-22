@@ -1,0 +1,42 @@
+---
+- name: Backup Huawei Switch Running Configuration
+  hosts: all # 针对清单中的所有主机执行，可通过`limit`指定部分主机
+  gather_facts: no # 网络设备通常无需收集facts
+  
+  vars:
+    backup_dir: "/opt/ansible_backup/{{ inventory_hostname }}" # 定义备份目录，按主机名分隔
+    backup_file: "{{ inventory_hostname }}_{{ ansible_date_time.date }}.cfg" # 定义备份文件名格式
+
+  tasks:
+    # 任务1：在AWX服务器上为每台交换机创建专属备份目录
+    - name: Create backup directory on AWX server
+      file:
+        path: "{{ backup_dir }}"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost # 该操作在AWX本地执行
+      run_once: false # 每台主机都需要执行
+
+    # 任务2：登录交换机并获取当前运行配置
+    - name: Get current running configuration from switch
+      community.network.huawei_command: # 使用华为模块执行命令
+        commands: display current-configuration
+      register: config_output # 将命令输出注册到变量
+
+    # 任务3：将获取的配置保存到AWX服务器的文件中
+    - name: Save configuration to local file
+      copy:
+        content: "{{ config_output.stdout[0] }}" # 将命令输出写入文件
+        dest: "{{ backup_dir }}/{{ backup_file }}"
+        mode: '0644'
+      delegate_to: localhost
+      
+    # （可选）任务4：压缩旧备份，例如保留最近7天的配置
+    - name: Archive old backups (keep recent 7 days)
+      archive:
+        path: "{{ backup_dir }}"
+        dest: "/opt/ansible_backup/archived/{{ inventory_hostname }}-{{ ansible_date_time.date }}.tar.gz"
+        format: gz
+        remove: yes # 压缩后删除原文件
+      delegate_to: localhost
+      when: false # 默认关闭，如需启用请将条件改为`true`或自定义条件
