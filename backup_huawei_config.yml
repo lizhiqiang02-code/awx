@@ -1,80 +1,54 @@
 ---
-- name: 备份华为交换机配置至远程服务器
+- name: 备份华为交换机配置至远程服务器（AWX凭据方式）
   hosts: "{{ target_switches | default('huawei_switches') }}"
   gather_facts: no
+  
   vars:
-    # >>> 核心：远程备份服务器配置 <<<
     backup_server: "172.20.149.118"
-    backup_server_user: "root" # 修改为你的远程服务器用户名
+    backup_server_user: "{{ remote_backup_user }}"      # 从AWX变量获取
+    backup_server_password: "{{ remote_backup_pass }}"  # 从AWX变量获取
     backup_remote_path: "/var/lib/network-backup"
-    
-    # 本地临时目录（在AWX任务容器内）
     local_temp_dir: "/tmp/backup_temp/{{ inventory_hostname }}"
     
-    # 备份文件名格式
-    backup_filename: "{{ inventory_hostname }}_{{ ansible_date_time.date }}.cfg"
-    
   tasks:
-    # 第一阶段：从交换机获取配置
-    - name: 创建本地临时目录 (在AWX容器内)
-      file:
-        path: "{{ local_temp_dir }}"
-        state: directory
-        mode: '0755'
-      delegate_to: localhost
-      run_once: false
-
-    - name: 获取华为交换机的当前运行配置
-      community.network.huawei_command: # 关键模块，用于华为设备
+    # 1. 从交换机获取配置（同上）
+    - name: 获取交换机配置
+      community.network.huawei_command:
         commands: display current-configuration
       register: switch_config
 
-    - name: 将配置写入本地临时文件
+    - name: 保存配置到临时文件
       copy:
         content: "{{ switch_config.stdout[0] }}"
-        dest: "{{ local_temp_dir }}/{{ backup_filename }}"
+        dest: "{{ local_temp_dir }}/{{ inventory_hostname }}_{{ ansible_date_time.date }}.cfg"
         mode: '0644'
       delegate_to: localhost
-      changed_when: false # 此任务总是会执行，不触发changed状态
 
-    # 第二阶段：传输到远程备份服务器
-    # 方案A：使用 synchronize 模块（基于rsync，推荐）
-    - name: 【方案A】使用rsync同步备份文件到远程服务器
-      synchronize:
-        src: "{{ local_temp_dir }}/"
-        dest: "{{ backup_server_user }}@{{ backup_server }}:{{ backup_remote_path }}/{{ inventory_hostname }}/"
-        # 以下是关键参数：
-        rsync_opts:
-          - "--archive"       # 归档模式，保留权限、时间等
-          - "--compress"      # 压缩传输
-          - "--chmod=D755,F644" # 确保目录和文件有正确权限
-        private_key: "/path/to/ssh/private/key" # 如果使用密钥认证，指定路径
-        # use_ssh_args: yes   # 可继承Ansible的SSH参数
-      delegate_to: localhost
-      become: false
-      # 如果使用密码而非密钥，需额外配置：
-      # vars:
-      #   ansible_ssh_pass: your_password  # ❌ 不安全！建议用AWX凭据管理
-
-
-    # 第三阶段：清理与验证
-    - name: 清理本地临时文件
-      file:
-        path: "{{ local_temp_dir }}"
-        state: absent
-      delegate_to: localhost
-
-    - name: 验证远程备份文件
-      stat:
-        path: "{{ backup_remote_path }}/{{ inventory_hostname }}/{{ backup_filename }}"
+    # 2. 使用ansible.builtin.copy委托到远程服务器
+    - name: 复制文件到远程备份服务器
+      ansible.builtin.copy:
+        src: "{{ local_temp_dir }}/{{ inventory_hostname }}_{{ ansible_date_time.date }}.cfg"
+        dest: "{{ backup_remote_path }}/{{ inventory_hostname }}/"
+        mode: '0644'
       delegate_to: "{{ backup_server }}"
-      register: remote_file_stat
-      ignore_errors: yes # 避免验证失败导致整个任务失败
+      # 关键：通过连接变量传递认证信息
+      vars:
+        ansible_user: "{{ backup_server_user }}"
+        ansible_ssh_pass: "{{ backup_server_password }}"
+        ansible_connection: ssh
+      # 注意：需要备份服务器在AWX清单中定义
 
-    - name: 输出备份结果摘要
-      debug:
-        msg:
-          - "备份 {{ '成功' if remote_file_stat.stat.exists | default(false) else '失败' }}"
-          - "设备: {{ inventory_hostname }}"
-          - "文件: {{ backup_remote_path }}/{{ inventory_hostname }}/{{ backup_filename }}"
-          - "大小: {{ remote_file_stat.stat.size | default('未知') }} 字节"
+    # 3. 或者使用uri模块通过API上传（如果服务器支持）
+    - name: 【替代方案】通过HTTP API上传备份
+      uri:
+        url: "http://172.20.149.118:8080/upload"  # 假设有上传接口
+        method: POST
+        user: "{{ backup_server_user }}"
+        password: "{{ backup_server_password }}"
+        body_format: json
+        body:
+          filename: "{{ inventory_hostname }}_{{ ansible_date_time.date }}.cfg"
+          content: "{{ switch_config.stdout[0] | b64encode }}"
+        status_code: 200
+      delegate_to: localhost
+      when: false  # 默认不启用，需要时改为true
