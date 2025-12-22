@@ -5,7 +5,7 @@
   vars:
     # >>> 核心：远程备份服务器配置 <<<
     backup_server: "172.20.149.118"
-    backup_server_user: "ansible_backup" # 修改为你的远程服务器用户名
+    backup_server_user: "root" # 修改为你的远程服务器用户名
     backup_remote_path: "/var/lib/network-backup"
     
     # 本地临时目录（在AWX任务容器内）
@@ -56,16 +56,6 @@
       # vars:
       #   ansible_ssh_pass: your_password  # ❌ 不安全！建议用AWX凭据管理
 
-    # 方案B：使用 copy 模块 + delegate_to（更简单直接）
-    - name: 【方案B】直接复制文件到远程服务器
-      copy:
-        src: "{{ local_temp_dir }}/{{ backup_filename }}"
-        dest: "{{ backup_remote_path }}/{{ inventory_hostname }}/{{ backup_filename }}"
-        mode: '0644'
-      delegate_to: "{{ backup_server }}" # 关键：将任务委托给远程服务器执行
-      become: yes # 如果需要sudo权限写入目录
-      become_user: root
-      # 注意：此方法要求AWX能直接ssh到backup_server，且已在AWX的清单中定义
 
     # 第三阶段：清理与验证
     - name: 清理本地临时文件
