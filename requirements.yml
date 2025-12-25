@@ -7,7 +7,7 @@ collections:
     version: ">=2.11.0"  # 支持 2.15.x
   
   - name: community.network
-    version: ">=6.0.0"   # 支持 2.15.x
+    version: ">=4.0.0"   # 支持 2.15.x
   
   # 厂商 collections
   - name: cisco.ios
