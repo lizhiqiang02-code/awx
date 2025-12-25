@@ -1,54 +1,16 @@
 ---
-- name: 备份华为交换机配置至远程服务器（AWX凭据方式）
-  hosts: "{{ target_switches | default('huawei_switches') }}"
+- name: Execute multiple commands on Huawei CE switches
+  hosts: all
   gather_facts: no
   
-  vars:
-    backup_server: "172.20.149.118"
-    backup_server_user: "{{ remote_backup_user }}"      # 从AWX变量获取
-    backup_server_password: "{{ remote_backup_pass }}"  # 从AWX变量获取
-    backup_remote_path: "/var/lib/network-backup"
-    local_temp_dir: "/tmp/backup_temp/{{ inventory_hostname }}"
-    
   tasks:
-    # 1. 从交换机获取配置（同上）
-    - name: 获取交换机配置
-      community.network.huawei_command:
-        commands: display current-configuration
-      register: switch_config
-
-    - name: 保存配置到临时文件
-      copy:
-        content: "{{ switch_config.stdout[0] }}"
-        dest: "{{ local_temp_dir }}/{{ inventory_hostname }}_{{ ansible_date_time.date }}.cfg"
-        mode: '0644'
-      delegate_to: localhost
-
-    # 2. 使用ansible.builtin.copy委托到远程服务器
-    - name: 复制文件到远程备份服务器
-      ansible.builtin.copy:
-        src: "{{ local_temp_dir }}/{{ inventory_hostname }}_{{ ansible_date_time.date }}.cfg"
-        dest: "{{ backup_remote_path }}/{{ inventory_hostname }}/"
-        mode: '0644'
-      delegate_to: "{{ backup_server }}"
-      # 关键：通过连接变量传递认证信息
-      vars:
-        ansible_user: "{{ backup_server_user }}"
-        ansible_ssh_pass: "{{ backup_server_password }}"
-        ansible_connection: ssh
-      # 注意：需要备份服务器在AWX清单中定义
-
-    # 3. 或者使用uri模块通过API上传（如果服务器支持）
-    - name: 【替代方案】通过HTTP API上传备份
-      uri:
-        url: "http://172.20.149.118:8080/upload"  # 假设有上传接口
-        method: POST
-        user: "{{ backup_server_user }}"
-        password: "{{ backup_server_password }}"
-        body_format: json
-        body:
-          filename: "{{ inventory_hostname }}_{{ ansible_date_time.date }}.cfg"
-          content: "{{ switch_config.stdout[0] | b64encode }}"
-        status_code: 200
-      delegate_to: localhost
-      when: false  # 默认不启用，需要时改为true
+    - name: Set screen length and get version
+      ansible.netcommon.cli_command:
+        command: |
+          screen-length 0 temporary
+          display version
+      register: result
+    
+    - name: Display results
+      debug:
+        var: result.stdout
