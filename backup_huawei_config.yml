@@ -9,6 +9,7 @@
         command: |
           screen-length 0 temporary
           display version
+          display curr
       register: result
     
     - name: Display results
