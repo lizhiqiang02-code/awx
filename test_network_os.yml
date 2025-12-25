@@ -1,0 +1,34 @@
+# test_network_os.yml
+---
+- name: 测试支持的 network_os
+  hosts: localhost
+  gather_facts: false
+  
+  tasks:
+    - name: 测试各种 network_os
+      vars:
+        test_os_list:
+          - ios
+          - junos
+          - eos
+          - nxos
+          - huawei
+          - huawei_vrp
+          - ce
+          - vrp
+          - arista_eos
+          - cisco_ios
+          - cisco_nxos
+          - juniper_junos
+      ansible.builtin.debug:
+        msg: "测试 network_os: {{ item }}"
+      loop: "{{ test_os_list }}"
+    
+    - name: 查看 ansible.netcommon 插件
+      command: ansible-doc -t connection -l
+      register: plugins
+      changed_when: false
+    
+    - name: 显示所有 connection 插件
+      debug:
+        msg: "{{ plugins.stdout_lines }}"
