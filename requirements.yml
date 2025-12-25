@@ -1,10 +1,9 @@
 # requirements.yml
 collections:
-  # 基础网络 collection
   - name: ansible.netcommon
-    version: ">=8.2.0"
+    version: ">=8.2.0"  # 指定版本或版本范围
   
-  # 厂商特定 collections
+  # 可以添加其他需要的 collections
   - name: cisco.ios
     version: ">=4.8.0"
   
@@ -13,20 +12,8 @@ collections:
   
   - name: arista.eos
     version: ">=6.0.0"
-  
-  # 华为交换机 collection - 关键！
-  - name: huawei.enterprise
-    version: ">=1.0.0"
-  
-  # 华为 CloudEngine (CE) 交换机
-  - name: huawei.cloudengine
-    version: ">=1.0.0"
-  
-  # 华为 NE 系列路由器
-  - name: huawei.ne
-    version: ">=1.0.0"
 
 # 如果需要 roles 也可以添加
 # roles:
-#   - name: huawei.enterprise
+#   - name: username.role_name
 #     version: v1.0.0
