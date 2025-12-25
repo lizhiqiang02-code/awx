@@ -1,0 +1,19 @@
+# requirements.yml
+collections:
+  - name: ansible.netcommon
+    version: ">=8.2.0"  # 指定版本或版本范围
+  
+  # 可以添加其他需要的 collections
+  - name: cisco.ios
+    version: ">=4.8.0"
+  
+  - name: junipernetworks.junos
+    version: ">=4.0.0"
+  
+  - name: arista.eos
+    version: ">=6.0.0"
+
+# 如果需要 roles 也可以添加
+# roles:
+#   - name: username.role_name
+#     version: v1.0.0
