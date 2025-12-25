@@ -6,7 +6,7 @@
   
   tasks:
     # 尝试不同的 network_os 值
-    - name: 尝试 network_os: huawei
+    - name: 尝试 network_os huawei
       ansible.netcommon.cli_command:
         command: display version
       register: result_huawei
@@ -15,7 +15,7 @@
         ansible_network_os: huawei
       ignore_errors: yes
     
-    - name: 尝试 network_os: ce
+    - name: 尝试 network_os ce
       ansible.netcommon.cli_command:
         command: display version
       register: result_ce
@@ -24,7 +24,7 @@
         ansible_network_os: ce
       ignore_errors: yes
     
-    - name: 尝试 network_os: vrp
+    - name: 尝试 network_os vrp
       ansible.netcommon.cli_command:
         command: display version
       register: result_vrp
